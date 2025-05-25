@@ -19,17 +19,20 @@ impl Transfer {
                 println!("Exiting server");
                 return Ok(true);
             }
-            Commands::Start{port} => {
+            Commands::Start { port } => {
                 self.serve.start(port);
             }
             Commands::Status => {
                 println!("{}", self.serve.state());
             }
             Commands::Port => {
-                println!("{}", match self.serve.port() {
-                    Some(port) => port.to_string(),
-                    None => "No listening port".to_string(),
-                });
+                println!(
+                    "{}",
+                    match self.serve.port() {
+                        Some(port) => port.to_string(),
+                        None => "No listening port".to_string(),
+                    }
+                );
             }
         }
         Ok(false)
@@ -39,6 +42,8 @@ impl Transfer {
 pub fn run() {
     let mut rl = DefaultEditor::new().unwrap();
     let mut transfer = Transfer::default();
+    // TODO: Add a configuration file and detect whether to automatically start the service from the configuration file
+    transfer.serve.start(8080);
     loop {
         let line = match rl.readline("transfer> ") {
             Ok(line) => {

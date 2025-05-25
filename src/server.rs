@@ -1,5 +1,7 @@
+mod file_tree;
+mod https_parse;
+
 use std::{
-    io::{BufRead, BufReader},
     net::{SocketAddr, TcpListener, TcpStream},
     sync::{
         Arc,
@@ -7,6 +9,8 @@ use std::{
     },
     thread,
 };
+
+use https_parse::response;
 
 /// Thread responsible for running the transfer server.
 /// This serve based
@@ -62,22 +66,22 @@ fn start_server(port: u16, running: Arc<AtomicBool>) {
     };
 
     running.store(true, Ordering::SeqCst);
-    for stream in tcplister.incoming() {
+    for  stream in tcplister.incoming() {
         if !running.load(Ordering::SeqCst) {
             break;
         }
 
         match stream {
-            Ok(stream) => {
-                let buf = BufReader::new(&stream);
-                for line in buf.lines() {
-                    let line = line.unwrap();
-                    println!("{}", line);
-                }
+            Ok(mut stream) => {
+                handle_connection(&mut stream);
             }
             Err(_) => todo!(),
         }
     }
+}
+
+fn handle_connection(stream: &mut TcpStream) {
+    response(stream);
 }
 
 impl Drop for Serve {
