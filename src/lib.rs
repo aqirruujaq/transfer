@@ -19,8 +19,8 @@ impl Transfer {
                 println!("Exiting server");
                 return Ok(true);
             }
-            Commands::Start => {
-                self.serve.start(8080);
+            Commands::Start{port} => {
+                self.serve.start(port);
             }
             Commands::Status => {
                 println!("{}", self.serve.state());

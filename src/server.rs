@@ -1,7 +1,10 @@
 use std::{
     io::{BufRead, BufReader},
     net::{SocketAddr, TcpListener, TcpStream},
-    sync::{Arc, Mutex},
+    sync::{
+        Arc,
+        atomic::{AtomicBool, Ordering},
+    },
     thread,
 };
 
@@ -10,7 +13,7 @@ use std::{
 #[derive(Default)]
 pub struct Serve {
     thread: Option<thread::JoinHandle<()>>,
-    state: Arc<Mutex<State>>,
+    running: Arc<AtomicBool>,
     port: Option<u16>,
 }
 
@@ -26,10 +29,10 @@ impl Serve {
     }
 
     pub fn state(&self) -> &str {
-        let state = *self.state.lock().unwrap();
+        let state = self.running.load(Ordering::SeqCst);
         match state {
-            State::NotRunning => "The serve is not running",
-            State::Running => "The serve is running",
+            false => "The serve is not running",
+            true => "The serve is running",
         }
     }
 
@@ -45,22 +48,22 @@ impl Serve {
         }
 
         // Start the server in a new thread.
-        let state = Arc::clone(&self.state);
+        let running = Arc::clone(&self.running);
         self.port = Some(port);
-        self.thread = Some(thread::spawn(move || start_server(port, state)));
+        self.thread = Some(thread::spawn(move || start_server(port, running)));
     }
 }
 
-fn start_server(port: u16, state: Arc<Mutex<State>>) {
+fn start_server(port: u16, running: Arc<AtomicBool>) {
     let tcplister = if let Ok(tl) = TcpListener::bind(SocketAddr::from(([0, 0, 0, 0], port))) {
         tl
     } else {
         return;
     };
 
-    *state.lock().unwrap() = State::Running;
+    running.store(true, Ordering::SeqCst);
     for stream in tcplister.incoming() {
-        if *state.lock().unwrap() == State::NotRunning {
+        if !running.load(Ordering::SeqCst) {
             break;
         }
 
@@ -80,18 +83,9 @@ fn start_server(port: u16, state: Arc<Mutex<State>>) {
 impl Drop for Serve {
     fn drop(&mut self) {
         if let Some(serve) = self.thread.take() {
-            *self.state.lock().unwrap() = State::NotRunning;
+            self.running.store(false, Ordering::SeqCst);
             TcpStream::connect(format!("127.0.0.1:{}", self.port.unwrap())).unwrap();
             serve.join().unwrap();
         }
     }
-}
-
-#[derive(Default, Clone, Copy, PartialEq, Eq)]
-enum State {
-    // The server is running.
-    Running,
-    // The server is not running
-    #[default]
-    NotRunning,
 }
