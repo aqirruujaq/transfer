@@ -8,15 +8,15 @@ use std::{
         atomic::{AtomicBool, Ordering},
     },
     thread,
-    time::Duration,
 };
 
-use https_parse::response;
+use file_tree::FileTree;
 
 /// Thread responsible for running the transfer server.
 /// This serve based
 #[derive(Default)]
 pub struct Serve {
+    file_tree: Arc<FileTree>,
     thread: Option<thread::JoinHandle<()>>,
     running: Arc<AtomicBool>,
     port: Option<u16>,
@@ -55,11 +55,14 @@ impl Serve {
         // Start the server in a new thread.
         let running = Arc::clone(&self.running);
         self.port = Some(port);
-        self.thread = Some(thread::spawn(move || start_server(port, running)));
+        let file_tree = Arc::clone(&self.file_tree);
+        self.thread = Some(thread::spawn(move || {
+            start_server(port, running, file_tree)
+        }));
     }
 }
 
-fn start_server(port: u16, running: Arc<AtomicBool>) {
+fn start_server(port: u16, running: Arc<AtomicBool>, file_tree: Arc<FileTree>) {
     let tcplister = if let Ok(tl) = TcpListener::bind(SocketAddr::from(([0, 0, 0, 0], port))) {
         tl
     } else {
@@ -73,26 +76,24 @@ fn start_server(port: u16, running: Arc<AtomicBool>) {
         }
 
         match stream {
-            Ok(mut stream) => {
-                stream
-                    .set_read_timeout(Some(Duration::from_secs(10)))
-                    .expect("No error will occur");
-                handle_connection(&mut stream);
+            Ok(mut stream) => {                    
+                handle_connection(&mut stream, &file_tree);
+                stream.shutdown(std::net::Shutdown::Both).unwrap();
             }
             Err(_) => todo!(),
         }
     }
 }
 
-fn handle_connection(stream: &mut TcpStream) {
-    response(stream);
+fn handle_connection(stream: &mut TcpStream, file_tree: &FileTree) {
+    https_parse::handle_connection(stream, file_tree);
 }
 
 impl Drop for Serve {
     fn drop(&mut self) {
         if let Some(serve) = self.thread.take() {
             self.running.store(false, Ordering::SeqCst);
-            TcpStream::connect(format!("127.0.0.1:{}", self.port.unwrap())).unwrap();
+            TcpStream::connect(format!("localhost:{}", self.port.unwrap())).unwrap();
             serve.join().unwrap();
         }
     }
