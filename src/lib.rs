@@ -1,5 +1,6 @@
 use clap::Parser;
 use cli::{Cli, Commands};
+mod config;
 use rustyline::{DefaultEditor, error::ReadlineError};
 use server::Serve;
 

@@ -8,6 +8,7 @@ use std::{
         atomic::{AtomicBool, Ordering},
     },
     thread,
+    time::Duration,
 };
 
 use https_parse::response;
@@ -66,13 +67,16 @@ fn start_server(port: u16, running: Arc<AtomicBool>) {
     };
 
     running.store(true, Ordering::SeqCst);
-    for  stream in tcplister.incoming() {
+    for stream in tcplister.incoming() {
         if !running.load(Ordering::SeqCst) {
             break;
         }
 
         match stream {
             Ok(mut stream) => {
+                stream
+                    .set_read_timeout(Some(Duration::from_secs(10)))
+                    .expect("No error will occur");
                 handle_connection(&mut stream);
             }
             Err(_) => todo!(),

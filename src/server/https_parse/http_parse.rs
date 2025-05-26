@@ -1,28 +1,36 @@
-use std::{io::Read, net::TcpStream};
+use std::{
+    io::{BufRead, BufReader, Error},
+    net::TcpStream,
+};
 
 use http::{Request, Response};
 use httparse::EMPTY_HEADER;
 
 pub fn response(req: &Request<()>) -> http::Result<Response<String>> {
     match req.uri().path() {
-        // "/" => index(),
+        "/" => index(),
         _ => not_found(),
     }
 }
 
-fn not_found() -> http::Result<Response<String>> {
-    let res = Response::builder()
+fn index() -> http::Result<Response<String>> {
+    Response::builder()
         .status(200)
-        .body(include_str!("../../../404.html").to_string());
-    res
+        .body(include_str!("../../../index.html").to_string())
+}
+
+fn not_found() -> http::Result<Response<String>> {
+    Response::builder()
+        .status(200)
+        .body(include_str!("../../../404.html").to_string())
 }
 
 pub trait SerializeResponse {
-    fn into_byte(&self) -> Vec<u8>;
+    fn to_byte(&self) -> Vec<u8>;
 }
 
 impl SerializeResponse for Response<String> {
-    fn into_byte(&self) -> Vec<u8> {
+    fn to_byte(&self) -> Vec<u8> {
         format!(
             "HTTP/1.1 200 OK\r\nContent-Length: {}\r\n\r\n{}",
             self.body().len(),
@@ -34,7 +42,7 @@ impl SerializeResponse for Response<String> {
 }
 
 impl SerializeResponse for Response<&[u8]> {
-    fn into_byte(&self) -> Vec<u8> {
+    fn to_byte(&self) -> Vec<u8> {
         let mut res: Vec<u8> = format!(
             "HTTP/1.1 200 OK\r\nContent-Length: {}\r\n\r\n",
             self.body().len()
@@ -52,7 +60,10 @@ pub trait DeserializeRequset {
 
 impl DeserializeRequset for Request<()> {
     fn from_stream(stream: &mut TcpStream) -> http::Result<Request<()>> {
-        let buf = read_http_request(stream);
+        let buf = match read_http_request(stream){
+            Ok(buf) => buf,
+            Err(e) => todo!("resolve or info {}", e),
+        };
 
         let mut header = [EMPTY_HEADER; 16];
         let mut parse = httparse::Request::new(&mut header);
@@ -65,17 +76,19 @@ impl DeserializeRequset for Request<()> {
     }
 }
 
-// TODO: use KMP
-fn read_http_request(stream: &mut TcpStream) -> Vec<u8> {
-    let mut buffer = Vec::new();
-    let mut read_buf = [0u8; 1024];
+fn read_http_request(stream: &mut TcpStream) -> Result<Vec<u8>, Error> {
+    let mut buf_reader = BufReader::new(stream);
+    let mut buf_line = String::new();
+    let mut buf = Vec::new();
 
     loop {
-        let n = stream.read(&mut read_buf).unwrap_or_default();
-        if n == 0 {
-            break;
+        buf_reader.read_line(&mut buf_line)?;
+        buf.extend_from_slice(buf_line.as_bytes());
+        if &buf_line == "\r\n" {
+           break;
         }
-
-        buffer.extend_from_slice(&read_buf[..n]);
+        buf_line.clear();
     }
+
+    Ok(buf)
 }
