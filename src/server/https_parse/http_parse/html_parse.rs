@@ -1,10 +1,10 @@
-use std::io::Write;
+use std::{io::Write, sync::Arc};
 
 pub static INDEX_START: &[u8] = include_bytes!("index.html1");
 pub static INDEX_END: &[u8] = include_bytes!("index.html2");
 pub static NOT_FOUND_BODY: &[u8] = include_bytes!("404.html");
 
-pub fn join_index(names: &Vec<String>) -> Vec<u8> {
+pub fn join_index<'a>(names:impl Iterator<Item = &'a Arc<str>>) -> Vec<u8> {
     let mut vec = Vec::new();
     vec.extend_from_slice(INDEX_START);
 

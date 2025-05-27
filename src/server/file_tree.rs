@@ -1,30 +1,42 @@
-use std::{fs, io, path::Path};
+use std::{
+    collections::HashMap,
+    fs::{read_dir, File},
+    io,
+    path::Path,
+ sync::Arc,
+};
 
 // In order to use this program as soon as possible,
 // currently only read the contents of a file in a fixed location
 pub struct FileTree {
-    file_name: Vec<String>,
-    path_name: String,
+    files: HashMap<Arc<str>, File>,
 }
 
 impl FileTree {
-    pub fn new<P>(path: P) -> Result<FileTree, io::Error>
+    fn new<P>(path: P) -> Result<FileTree, io::Error>
     where
         P: AsRef<Path>,
     {
-        let path_name = path.as_ref().to_string_lossy().to_string();
-        let dir = fs::read_dir(path)?;
-        let file_name: Result<Vec<String>, io::Error> = dir
-            .map(|res| res.map(|dir| dir.file_name().display().to_string()))
-            .collect();
-        Ok(FileTree {
-            file_name: file_name?,
-            path_name,
-        })
+        let dir = read_dir(path)?;
+        let mut files = HashMap::new();
+        for file in dir {
+            let file = file?;
+            if file.file_type()?.is_file() {
+                files.insert(
+                    Arc::from(file.file_name().into_string().unwrap()),
+                    File::open(file.path())?,
+                );
+            }
+        }
+        Ok(FileTree { files })
     }
 
-    pub fn file_names(&self) -> &Vec<String> {
-        &self.file_name
+    pub fn file_names(&self) -> impl Iterator<Item = &Arc<str>> {
+        self.files.keys()
+    }
+
+    pub fn get_file(&self, name: &str) -> Option<&File> {
+        self.files.get(name)
     }
 }
 

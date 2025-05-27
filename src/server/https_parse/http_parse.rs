@@ -1,5 +1,5 @@
 use std::{
-    io::{BufRead, BufReader, Error, Write},
+    io::{BufRead, BufReader, Error, Read, Write},
     net::TcpStream,
     time::Duration,
 };
@@ -7,13 +7,27 @@ use std::{
 use html_parse::{NOT_FOUND_BODY, join_index};
 use http::{Request, Response, Version};
 use httparse::EMPTY_HEADER;
+use log::info;
 
 use crate::server::file_tree::FileTree;
 
 mod html_parse;
 
 pub fn handle_connection(stream: &mut TcpStream, file_tree: &FileTree) {
-    let req = Request::from_stream(stream).unwrap();
+    let bytes = match read_http_request_head(stream) {
+        Ok(b) => {
+            if b.is_empty() {
+                return;
+            } else {
+                b
+            }
+        }
+        Err(e) => {
+            info!("{}", e);
+            return;
+        }
+    };
+    let req = Request::from_byte(&bytes).unwrap();
     let resp = response(&req, file_tree).unwrap();
     stream.write_all(&resp.to_byte()).unwrap();
 }
@@ -22,13 +36,31 @@ pub fn response(req: &Request<()>, file_tree: &FileTree) -> http::Result<Respons
     match req.uri().path() {
         "/" => index(file_tree),
         "/favicon.ico" => favicon(),
-        _ => not_found(),
+        url => transfer_file(file_tree, &url[1..]),
     }
+}
+
+fn transfer_file(file_tree: &FileTree, name: &str) -> http::Result<Response<Vec<u8>>> {
+    let file = file_tree.get_file(name);
+    if file.is_none() {
+        return not_found();
+    }
+
+    let mut buf = Vec::new();
+    if let Some(mut f) = file {
+        f.read_to_end(&mut buf).unwrap();
+    }
+
+    Response::builder()
+        .status(200)
+        .header("Connection", "close")
+        .header("Content-Length", buf.len())
+        .body(buf)
 }
 
 fn favicon() -> http::Result<Response<Vec<u8>>> {
     Response::builder()
-        .status(204)
+        .status(404)
         .header("Connection", "close")
         .header("Content-Length", 0)
         .body(Vec::new())
@@ -45,8 +77,8 @@ fn index(file_tree: &FileTree) -> http::Result<Response<Vec<u8>>> {
 
 fn not_found() -> http::Result<Response<Vec<u8>>> {
     Response::builder()
-        .status(204)
-        .header("Connection", "close")
+        .status(404)
+        // .header("Connection", "close")
         .header("Content-Length", NOT_FOUND_BODY.len())
         .body(NOT_FOUND_BODY.to_vec())
 }
@@ -83,45 +115,48 @@ fn write_resp_head<T>(buf: &mut Vec<u8>, resp: &Response<T>) {
 }
 
 pub trait DeserializeRequset {
-    fn from_stream(stream: &mut TcpStream) -> http::Result<Request<()>>;
+    fn from_byte(bytes: &[u8]) -> http::Result<Request<()>>;
 }
 
 impl DeserializeRequset for Request<()> {
-    fn from_stream(stream: &mut TcpStream) -> http::Result<Request<()>> {
-        let buf = match read_http_request_head(stream) {
-            Ok(buf) => buf,
-            Err(e) => todo!("resolve or info {}", e),
-        };
-
+    fn from_byte(bytes: &[u8]) -> http::Result<Request<()>> {
         let mut header = [EMPTY_HEADER; 16];
         let mut parse = httparse::Request::new(&mut header);
 
-        if parse.parse(&buf).is_err() {
-            todo!("add info");
+        if parse.parse(bytes).is_err() {
+            info!("parese err");
         }
 
         Request::builder().uri(parse.path.unwrap()).body(())
     }
 }
 
-// Reading data from TcpStream, timeout after ten seconds
-fn read_http_request_head(stream: &mut TcpStream) -> Result<Vec<u8>, Error> {
+/// Reading data from TcpStream, timeout after ten seconds
+/// This is synchronous and the browser will keep the connection open which is not very useful.
+pub fn read_http_request_head(stream: &mut TcpStream) -> Result<Vec<u8>, Error> {
     stream
         .set_read_timeout(Some(Duration::from_secs(1)))
         .expect("No error will occur");
-    let mut buf_reader = BufReader::new(stream);
+
+    let mut buf_reader = BufReader::new(Read::by_ref(stream));
     let mut buf_line = String::new();
     let mut buf = Vec::new();
+
+    if buf_reader.fill_buf()?.is_empty() {
+        return Ok(buf);
+    }
 
     loop {
         let byte = buf_reader.read_line(&mut buf_line)?;
         buf.extend_from_slice(buf_line.as_bytes());
 
-        if &buf_line == "\r\n" || buf_line.is_empty() {
+        if &buf_line == "\r\n" || byte == 0 {
             break;
         }
         buf_line.clear();
     }
+
+    stream.set_read_timeout(None).expect("No error will occur");
 
     Ok(buf)
 }
